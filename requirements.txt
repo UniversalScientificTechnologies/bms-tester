@@ -1,0 +1,4 @@
+# dp832.py a loop.py nepotřebují nic navíc (linuxový usbtmc driver)
+matplotlib   # grafy v reportu
+reportlab    # PDF report
+hidapi       # MLAB USBI2C (CP2112) – spínání R_L a LED
