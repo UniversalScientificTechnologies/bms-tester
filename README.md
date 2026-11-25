@@ -150,3 +150,7 @@ python3 loop.py -c 3 -v 1.8,3.3,5 -i 0.1 -n 10 --on 2 --off 1 -o loop.csv
 
 Cyklicky nastavuje napětí a zapíná/vypíná výstup. Zapnutý kanál použije jen s `--force`,
 na konci vrátí původní stav.
+
+## Licence
+
+[GPL-3.0](LICENSE)
