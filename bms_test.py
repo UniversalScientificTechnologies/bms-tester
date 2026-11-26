@@ -384,13 +384,15 @@ def test_ocp_dis(b, res):
         b.set_cell(vmin, cell_i)  # start v CV na spodním napětí
         if sw:
             sw.on()
-        time.sleep(0.3)
-        r, ok = b.dwell("ocp_dis", b.discharge_on, "start")
-        if not ok:
+        time.sleep(a.settle + 0.3)  # měření DP832 se obnovuje se zpožděním
+        # čekat, dokud ochrana vede A proud odpovídá R_L (jinak stará hodnota měření)
+        loaded = lambda r: b.discharge_on(r) and r["cell_i"] >= 0.7 * r["cell_v"] / rl
+        r, ok = b.dwell("ocp_dis", loaded, "start")
+        if not b.discharge_on(r):
             b.wake("ocp_dis")
-            r, ok = b.dwell("ocp_dis", b.discharge_on, "start po wake")
+            r, ok = b.dwell("ocp_dis", loaded, "start po wake")
         expected = r["cell_v"] / rl
-        if not ok:
+        if not b.discharge_on(r):
             out["error"] = "Protection not conducting at start, discharge OCP test not possible."
         elif r["cell_i"] < 0.7 * expected:
             out["error"] = (f"R_L not detected: cell current {r['cell_i']*1000:.0f} mA, "
@@ -486,11 +488,14 @@ def test_ocp_chg(b, res):
     out["stop"] = stop
     cell_i = min(3.0, max(a.ocp_cell_i, 1.3 * absorb))
     b.set_cell(a.vmid, cell_i)
-    time.sleep(0.3)
-    r, ok = b.dwell("ocp_chg", b.discharge_on, "start")
-    if not ok:
+    time.sleep(a.settle + 0.3)  # měření DP832 se obnovuje se zpožděním
+    # čekat, dokud ochrana vede A proud odpovídá R_C (jinak stará hodnota měření)
+    loaded = lambda r: b.discharge_on(r) and r["cell_i"] >= 0.7 * r["cell_v"] / a.r_cell
+    r, _ = b.dwell("ocp_chg", loaded, "start")
+    if not b.discharge_on(r):
         b.wake("ocp_chg")
-        r, ok = b.dwell("ocp_chg", b.discharge_on, "start po wake")
+        r, _ = b.dwell("ocp_chg", loaded, "start po wake")
+    ok = b.discharge_on(r)
     expected = r["cell_v"] / a.r_cell
     if r["cell_i"] < 0.7 * expected:
         out["error"] = (f"R_C not detected: cell current {r['cell_i']*1000:.0f} mA, "
