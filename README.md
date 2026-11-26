@@ -56,8 +56,8 @@ Testy (výchozí `--tests pass,uv,ov,ocp_dis,ocp_chg`, s `--load-gpio` bez `ocp_
    `--uv-step` (50 mV) až do vypnutí výstupu. Uvolnění: na P+/P− se připojí nabíječka
    `--uv-release-v` (3,0 V) a ověří se průchod oběma směry – nabíjení (nabíječka vytáhne
    uzel článku nahoru) a vybíjení (článek na 3,0 V, nabíječka odpojena, výstup vidí článek).
-3. **ov** – nabíječka stoupá od `--ov-start` (4,0 V) do `--ov-stop` (5,0 V) po `--step`
-   (20 mV), článek je nastaven o `--chg-delta` (100 mV) níž.
+3. **ov** – nabíječka stoupá od `--ov-start` (4,0 V) do `--ov-stop` (5,0 V) po `--ov-step`
+   (50 mV), článek je nastaven o `--chg-delta` (100 mV) níž.
    Vypnutí nabíjení se pozná poklesem napětí článku z napětí nabíječky na nastavení CH1.
 4. **ocp_dis / ocp_chg** – nadproudová ochrana při vybíjení a nabíjení (viz níže).
 

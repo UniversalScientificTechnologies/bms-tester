@@ -216,7 +216,7 @@ def test_ov(b, res):
     # (o chg_delta níž) – zůstane nabitý jako skutečný článek, takže se ochrana
     # hned znovu neuvolní (při pádu až na vmid by oscilovala).
     last_follow = None
-    for vc in frange(a.ov_start, a.ov_stop, a.step):  # napětí nabíječky
+    for vc in frange(a.ov_start, a.ov_stop, a.ov_step):  # napětí nabíječky
         b.set_cell(round(vc - a.chg_delta, 4))
         b.charge(vc)
         time.sleep(a.settle)
@@ -642,7 +642,7 @@ def detail_lines(a, res):
                  f"{a.uv_release_v} V and charger removed (discharge path = output sees the cell).")
     if o:
         D.append(f"OV: charger (CH{a.chg_ch}) swept from {a.ov_start} V to {a.ov_stop} V in "
-                 f"{a.step*1000:.0f} mV steps, cell (CH{a.cell_ch}) setpoint "
+                 f"{a.ov_step*1000:.0f} mV steps, cell (CH{a.cell_ch}) setpoint "
                  f"{a.chg_delta*1000:.0f} mV below the charger. A charge cut-off is detected when the "
                  f"cell voltage drops from the charger level back to the CH{a.cell_ch} setpoint.")
         if o.get("trip") is not None:
@@ -798,7 +798,7 @@ def parse_args(argv=None):
                     help="napětí nabíječky (a pak článku) pro uvolnění po UV [V]")
     ap.add_argument("--ov-start", type=float, default=4.0, help="začátek OV rampy (nabíječka) [V]")
     ap.add_argument("--ov-stop", type=float, default=5.0, help="konec OV rampy (nabíječka) [V]")
-    ap.add_argument("--step", type=float, default=0.02, help="krok OV rampy [V]")
+    ap.add_argument("--ov-step", type=float, default=0.05, help="krok OV rampy [V]")
     ap.add_argument("--dwell", type=float, default=1.5,
                     help="výdrž na kroku [s] – musí být delší než zpoždění detekce ochrany")
     ap.add_argument("--sample-period", type=float, default=0.2)
