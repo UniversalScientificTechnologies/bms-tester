@@ -154,7 +154,8 @@ def frange(start, stop, step):
 
 def test_uv(b, res):
     a = b.a
-    out = res["uv"] = dict(trip=None, last_on=None, release=None, recovered=False)
+    out = res["uv"] = dict(trip=None, last_on=None, rel_charge=False, rel_discharge=False,
+                           recovered=False)
     b.set_cell(a.vmid)
     b.sense_mode()
     r, ok = b.dwell("uv", b.discharge_on, "start")
@@ -166,8 +167,8 @@ def test_uv(b, res):
         print("[uv]", out["error"])
         return
 
-    # sestupná rampa
-    for v in frange(a.vmid, a.uv_stop, a.step):
+    # sestupná rampa uv_start -> uv_stop
+    for v in frange(a.uv_start, a.uv_stop, a.uv_step):
         b.set_cell(v)
         r, tripped = b.dwell("uv", b.discharge_off, "sweep down")
         if tripped:
@@ -182,22 +183,23 @@ def test_uv(b, res):
         b.set_cell(a.vmid)
         return
 
-    # uvolnění: zvyšovat napětí bez nabíječky
-    for v in frange(out["trip_set"], a.vmid, a.step):
-        b.set_cell(v)
-        r, on = b.dwell("uv", b.discharge_on, "release up")
-        if on:
-            out["release"] = r["cell_v"]
-            print(f"[uv] uvolněno samo při {r['cell_v']:.3f} V")
-            break
-        print(f"[uv] {v:.3f} V: vypnuto (P {r['chg_v']:.3f} V)")
-    else:
-        print("[uv] samo se neuvolnilo do středního napětí – zkouším připojit nabíječku")
+    # uvolnění nabíječkou: článek zůstává na napětí vypnutí, na P+/P− se připojí
+    # uv_release_v. 1) nabíjení: nabíječka vytáhne uzel článku nad nastavení CH1.
+    vr = a.uv_release_v
+    b.charge(vr, a.wake_i)
+    time.sleep(a.settle)
+    r, out["rel_charge"] = b.dwell("uv", b.charge_follows, f"release: nabíječka {vr} V")
+    print(f"[uv] nabíječka {vr} V: článek {r['cell_v']:.3f} V, proud {r['chg_i']*1000:.1f} mA "
+          f"-> nabíjení {'prochází' if out['rel_charge'] else 'NEPROCHÁZÍ'}")
+    # 2) vybíjení: článek na uv_release_v, nabíječka odpojena, výstup musí vidět článek
+    b.set_cell(vr)
+    b.sense_mode()
+    time.sleep(a.settle + 0.3)  # měření DP832 se obnovuje se zpožděním
+    r, out["rel_discharge"] = b.dwell("uv", b.discharge_on, f"release: článek {vr} V")
+    print(f"[uv] článek {r['cell_v']:.3f} V, výstup {r['chg_v']:.3f} V "
+          f"-> vybíjení {'prochází' if out['rel_discharge'] else 'NEPROCHÁZÍ'}")
+    out["recovered"] = out["rel_charge"] and out["rel_discharge"]
     b.set_cell(a.vmid)
-    if out["release"] is None:
-        b.wake("uv")
-    r, out["recovered"] = b.dwell("uv", b.discharge_on, "obnovení")
-    print(f"[uv] obnovení provozu: {'OK' if out['recovered'] else 'NE'}")
 
 
 def test_ov(b, res):
@@ -214,9 +216,9 @@ def test_ov(b, res):
     # (o chg_delta níž) – zůstane nabitý jako skutečný článek, takže se ochrana
     # hned znovu neuvolní (při pádu až na vmid by oscilovala).
     last_follow = None
-    for v in frange(a.vmid, a.ov_stop - a.chg_delta, a.step):
-        b.set_cell(v)
-        b.charge(round(v + a.chg_delta, 4))
+    for vc in frange(a.ov_start, a.ov_stop, a.step):  # napětí nabíječky
+        b.set_cell(round(vc - a.chg_delta, 4))
+        b.charge(vc)
         time.sleep(a.settle)
         # vzorkovat celou výdrž (zpoždění OV detekce); emulovaný článek po vypnutí
         # spadne na nastavení CH1 a ochrana se může hned znovu sepnout -> stačí
@@ -574,11 +576,9 @@ def summary_rows(a, res):
     if u:
         if u.get("trip") is not None:
             R.append(("UV cut-off", fmt(u["trip"]), vlim(a.uv_limits), verdict(u["trip"], a.uv_limits)))
-            R.append(("UV release",
-                      fmt(u["release"]) if u.get("release") else "no auto-release (charger needed)",
-                      "—", ""))
-            R.append(("Recovery after UV", "yes" if u["recovered"] else "NO", "—",
-                      "PASS" if u["recovered"] else "FAIL"))
+            for key, name in (("rel_charge", "charge"), ("rel_discharge", "discharge")):
+                R.append((f"UV release – {name} path ({a.uv_release_v} V)",
+                          "conducts" if u[key] else "NO", "—", "PASS" if u[key] else "FAIL"))
         else:
             R.append(("UV cut-off", u.get("error", f"no cut-off down to {a.uv_stop} V"),
                       vlim(a.uv_limits), "FAIL"))
@@ -634,12 +634,16 @@ def detail_lines(a, res):
     u, o = res.get("uv"), res.get("ov")
     d, c = res.get("ocp_dis"), res.get("ocp_chg")
     if u and u.get("trip") is not None:
-        D.append(f"UV: cell voltage swept down from {a.vmid} V in {a.step*1000:.0f} mV steps "
-                 f"({a.dwell} s per step). Last voltage with output on: {fmt(u.get('last_on'))}; "
-                 f"cut-off at {fmt(u['trip'])}. Release found by sweeping the voltage back up.")
+        D.append(f"UV: cell voltage swept down from {a.uv_start} V to {a.uv_stop} V in "
+                 f"{a.uv_step*1000:.0f} mV steps ({a.dwell} s per step). Last voltage with output "
+                 f"on: {fmt(u.get('last_on'))}; cut-off at {fmt(u['trip'])}. Release: charger "
+                 f"{a.uv_release_v} V connected to P+/P− with the cell at the cut-off voltage "
+                 f"(charge path = cell node pulled up by the charger), then cell set to "
+                 f"{a.uv_release_v} V and charger removed (discharge path = output sees the cell).")
     if o:
-        D.append(f"OV: cell (CH{a.cell_ch}) and charger (CH{a.chg_ch}) ramp up together, charger "
-                 f"{a.chg_delta*1000:.0f} mV above the cell. A charge cut-off is detected when the "
+        D.append(f"OV: charger (CH{a.chg_ch}) swept from {a.ov_start} V to {a.ov_stop} V in "
+                 f"{a.step*1000:.0f} mV steps, cell (CH{a.cell_ch}) setpoint "
+                 f"{a.chg_delta*1000:.0f} mV below the charger. A charge cut-off is detected when the "
                  f"cell voltage drops from the charger level back to the CH{a.cell_ch} setpoint.")
         if o.get("trip") is not None:
             D.append(f"OV: last cell voltage while charging {fmt(o['trip'])}; charger set to "
@@ -787,9 +791,14 @@ def parse_args(argv=None):
     ap.add_argument("--vmid", type=float, default=3.7, help="střední napětí článku [V]")
     ap.add_argument("--cell-i", type=float, default=0.1, help="proudový limit článku [A]")
     ap.add_argument("--chg-i", type=float, default=0.1, help="proudový limit nabíječky [A]")
+    ap.add_argument("--uv-start", type=float, default=2.7, help="začátek UV rampy [V]")
     ap.add_argument("--uv-stop", type=float, default=2.3, help="nejnižší napětí UV rampy [V]")
-    ap.add_argument("--ov-stop", type=float, default=4.5, help="nejvyšší napětí OV rampy [V]")
-    ap.add_argument("--step", type=float, default=0.02, help="krok rampy [V]")
+    ap.add_argument("--uv-step", type=float, default=0.05, help="krok UV rampy [V]")
+    ap.add_argument("--uv-release-v", type=float, default=3.0,
+                    help="napětí nabíječky (a pak článku) pro uvolnění po UV [V]")
+    ap.add_argument("--ov-start", type=float, default=4.0, help="začátek OV rampy (nabíječka) [V]")
+    ap.add_argument("--ov-stop", type=float, default=5.0, help="konec OV rampy (nabíječka) [V]")
+    ap.add_argument("--step", type=float, default=0.02, help="krok OV rampy [V]")
     ap.add_argument("--dwell", type=float, default=1.5,
                     help="výdrž na kroku [s] – musí být delší než zpoždění detekce ochrany")
     ap.add_argument("--sample-period", type=float, default=0.2)
@@ -854,8 +863,10 @@ def parse_args(argv=None):
         a.tests = "pass,uv,ov,ocp_dis" if a.load_gpio is not None else "pass,uv,ov,ocp_dis,ocp_chg"
     if a.cell_ch == a.chg_ch:
         ap.error("článek a nabíječka musí být různé kanály")
-    if not (a.uv_stop < a.vmid < a.ov_stop <= 4.6):
-        ap.error("musí platit uv-stop < vmid < ov-stop <= 4.6 V")
+    if not (a.uv_stop < a.uv_start < a.vmid and a.uv_stop < a.uv_release_v < a.ov_start
+            and a.ov_start < a.ov_stop <= 5.0):
+        ap.error("musí platit uv-stop < uv-start < vmid, uv-stop < uv-release-v < ov-start "
+                 "< ov-stop <= 5.0 V")
     if not (a.uv_stop < a.ocp_vmin < a.ocp_vmax <= a.ov_stop):
         ap.error("musí platit uv-stop < ocp-vmin < ocp-vmax <= ov-stop")
     unknown = set(t.strip() for t in a.tests.split(",")) - {"pass", "uv", "ov", "ocp_dis", "ocp_chg"}
